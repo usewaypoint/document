@@ -1,11 +1,14 @@
 import { create } from 'zustand';
-
+import debounce from '@mui/material/utils/debounce';
 import getConfiguration from '../../getConfiguration';
 
 import { TEditorConfiguration } from './core';
 
 type TValue = {
   document: TEditorConfiguration;
+
+  documentHistory: Array<TEditorConfiguration>,
+  documentHistoryIndex: number,
 
   selectedBlockId: string | null;
   selectedSidebarTab: 'block-configuration' | 'styles';
@@ -18,6 +21,8 @@ type TValue = {
 
 const editorStateStore = create<TValue>(() => ({
   document: getConfiguration(window.location.hash),
+  documentHistory: [],
+  documentHistoryIndex: 0,
   selectedBlockId: null,
   selectedSidebarTab: 'styles',
   selectedMainTab: 'editor',
@@ -76,7 +81,25 @@ export function setSidebarTab(selectedSidebarTab: TValue['selectedSidebarTab']) 
   return editorStateStore.setState({ selectedSidebarTab });
 }
 
+const addDocumentToHistory = debounce(function (document: TValue['document']) {
+  let documentHistory = editorStateStore.getState().documentHistory;
+  const currentIndex = editorStateStore.getState().documentHistoryIndex;
+  if (currentIndex < documentHistory.length - 1) {
+    documentHistory = documentHistory.slice(0, currentIndex + 1);
+  }
+  documentHistory.push(document);
+  if (documentHistory.length > 254) {
+    documentHistory = documentHistory.slice(1);
+  }
+
+  editorStateStore.setState({
+    documentHistory,
+    documentHistoryIndex: documentHistory.length - 1,
+  });
+}, 500);
+
 export function resetDocument(document: TValue['document']) {
+  addDocumentToHistory(document);
   return editorStateStore.setState({
     document,
     selectedSidebarTab: 'styles',
@@ -86,11 +109,47 @@ export function resetDocument(document: TValue['document']) {
 
 export function setDocument(document: TValue['document']) {
   const originalDocument = editorStateStore.getState().document;
+  const mergedDocument = {
+    ...originalDocument,
+    ...document,
+  };
+  addDocumentToHistory(mergedDocument);
   return editorStateStore.setState({
-    document: {
-      ...originalDocument,
-      ...document,
-    },
+    document: mergedDocument,
+  });
+}
+
+export function useCanUndo() {
+  return editorStateStore(s => s.documentHistory.length > 0 && s.documentHistoryIndex > 0);
+}
+
+export function useCanRedo() {
+  return editorStateStore(s => s.documentHistory.length > 0 && s.documentHistoryIndex < s.documentHistory.length - 1);
+}
+
+export function undo() {
+  const documentHistory = editorStateStore.getState().documentHistory;
+  const currentIndex = editorStateStore.getState().documentHistoryIndex;
+  if (documentHistory.length <= 0 || currentIndex <= 0) {
+    return;
+  }
+  const changeToIndex = currentIndex - 1;
+  editorStateStore.setState({
+    document: documentHistory[changeToIndex],
+    documentHistoryIndex: changeToIndex,
+  });
+}
+
+export function redo() {
+  const documentHistory = editorStateStore.getState().documentHistory;
+  const currentIndex = editorStateStore.getState().documentHistoryIndex;
+  if (documentHistory.length <= 0 || currentIndex >= documentHistory.length - 1) {
+    return;
+  }
+  const changeToIndex = currentIndex + 1;
+  editorStateStore.setState({
+    document: documentHistory[changeToIndex],
+    documentHistoryIndex: changeToIndex,
   });
 }
 
